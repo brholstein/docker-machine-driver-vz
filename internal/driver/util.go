@@ -14,63 +14,53 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package hyperkit
+package driver
 
 import (
-	"time"
-	"errors"
-	"strings"
-	"os/exec"
-	"os"
-	"github.com/docker/machine/libmachine/log"
 	"bufio"
 	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/docker/machine/libmachine/drivers"
+	"github.com/docker/machine/libmachine/log"
+	"github.com/docker/machine/libmachine/mcnutils"
+	"github.com/pkg/errors"
 )
 
-type RetriableError struct {
-	Err error
+func GetDiskPath(d *drivers.BaseDriver) string {
+	return d.ResolveStorePath(d.GetMachineName() + ".rawdisk")
 }
 
-func (r RetriableError) Error() string {
-	return "Temporary Error: " + r.Err.Error()
-}
-
-type MultiError struct {
-	Errors []error
-}
-
-func (m *MultiError) Collect(err error) {
+func createRawDiskImage(sshKeyPath, diskPath string, diskSizeMb uint) error {
+	tarBuf, err := mcnutils.MakeDiskImage(sshKeyPath)
 	if err != nil {
-		m.Errors = append(m.Errors, err)
+		return err
 	}
+
+	file, err := os.OpenFile(diskPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	file.Seek(0, os.SEEK_SET)
+
+	if _, err := file.Write(tarBuf.Bytes()); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return errors.Wrapf(err, "closing file %s", diskPath)
+	}
+
+	if err := os.Truncate(diskPath, int64(diskSizeMb*1000000)); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (m MultiError) ToError() error {
-	if len(m.Errors) == 0 {
-		return nil
-	}
-
-	errStrings := []string{}
-	for _, err := range m.Errors {
-		errStrings = append(errStrings, err.Error())
-	}
-	return errors.New(strings.Join(errStrings, "\n"))
-}
-
-func RetryAfter(attempts int, callback func() error, d time.Duration) (err error) {
-	m := MultiError{}
-	for i := 0; i < attempts; i++ {
-		err = callback()
-		if err == nil {
-			return nil
-		}
-		m.Collect(err)
-		if _, ok := err.(*RetriableError); !ok {
-			return m.ToError()
-		}
-		time.Sleep(d)
-	}
-	return m.ToError()
+func publicSSHKeyPath(d *drivers.BaseDriver) string {
+	return d.GetSSHKeyPath() + ".pub"
 }
 
 func hdiutil(args ...string) error {
@@ -88,7 +78,7 @@ func hdiutil(args ...string) error {
 	return nil
 }
 
-func readLine(path string) (string, error) {
+func readKernelCommandLine(path string) (string, error) {
 	inFile, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -97,8 +87,8 @@ func readLine(path string) (string, error) {
 
 	scanner := bufio.NewScanner(inFile)
 	for scanner.Scan() {
-		if kernelOptionRegexp.Match(scanner.Bytes()) {
-			m := kernelOptionRegexp.FindSubmatch(scanner.Bytes())
+		if kernelCommandLineOptionsRegexp.Match(scanner.Bytes()) {
+			m := kernelCommandLineOptionsRegexp.FindSubmatch(scanner.Bytes())
 			return string(m[1]), nil
 		}
 	}

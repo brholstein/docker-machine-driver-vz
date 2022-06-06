@@ -14,23 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package hyperkit
+package driver
 
 import (
 	"bufio"
 	"fmt"
 	"io"
-	"net"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 )
 
 const (
 	DHCPLeasesFile = "/var/db/dhcpd_leases"
-	CONFIG_PLIST   = "/Library/Preferences/SystemConfiguration/com.apple.vmnet"
-	NET_ADDR_KEY   = "Shared_Net_Address"
 )
 
 type DHCPEntry struct {
@@ -56,8 +52,10 @@ func getIpAddressFromFile(mac, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	trimmedMAC := trimMacAddress(mac)
 	for _, dhcpEntry := range dhcpEntries {
-		if dhcpEntry.HWAddress == mac {
+		if dhcpEntry.HWAddress == trimmedMAC {
 			return dhcpEntry.IPAddress, nil
 		}
 	}
@@ -111,21 +109,4 @@ func trimMacAddress(rawUUID string) string {
 	mac := re.ReplaceAllString(rawUUID, "$1")
 
 	return mac
-}
-
-func GetNetAddr() (net.IP, error) {
-	_, err := os.Stat(CONFIG_PLIST + ".plist")
-	if err != nil {
-		return nil, fmt.Errorf("Does not exist %s", CONFIG_PLIST+".plist")
-	}
-
-	out, err := exec.Command("defaults", "read", CONFIG_PLIST, NET_ADDR_KEY).Output()
-	if err != nil {
-		return nil, err
-	}
-	ip := net.ParseIP(strings.TrimSpace(string(out)))
-	if ip == nil {
-		return nil, fmt.Errorf("Could not get the network address for vmnet")
-	}
-	return ip, nil
 }
