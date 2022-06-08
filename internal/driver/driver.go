@@ -331,6 +331,14 @@ func (d *Driver) Start() error {
 
 	cmd := exec.Command("vz", "--pid", d.ResolveStorePath(pidFileName), configJson)
 
+	logFilePath := d.ResolveStorePath("vz.out")
+	logFile, err := os.OpenFile(logFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to open log file: %s", logFilePath)
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
 	if err := cmd.Start(); err != nil {
 		return errors.Wrap(err, "Failed to start VM")
 	}

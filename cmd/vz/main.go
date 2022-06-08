@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	vzog "github.com/Code-Hex/vz"
 	"github.com/brholstein/docker-machine-driver-vz/internal/vz"
 	"github.com/pkg/errors"
 )
@@ -40,6 +41,8 @@ func main() {
 		log.Fatal(errors.Wrap(err, "Failed to parse config"))
 	}
 
+	log.Print(config)
+
 	if pidFileName != "" {
 		var (
 			pidFileHandle *os.File
@@ -64,6 +67,40 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	getStateName := func(state vzog.VirtualMachineState) string {
+		stateName := "Unknown"
+		switch state {
+		case vzog.VirtualMachineStateError:
+			stateName = "Error"
+		case vzog.VirtualMachineStatePaused:
+			stateName = "Paused"
+		case vzog.VirtualMachineStatePausing:
+			stateName = "Pausing"
+		case vzog.VirtualMachineStateResuming:
+			stateName = "Resuming"
+		case vzog.VirtualMachineStateRunning:
+			stateName = "Running"
+		case vzog.VirtualMachineStateStarting:
+			stateName = "Starting"
+		case vzog.VirtualMachineStateStopped:
+			stateName = "Stopped"
+		}
+		return stateName
+	}
+
+	printCurrentState := func() {
+		state := vm.State()
+		log.Printf("VM state: %v", getStateName(state))
+	}
+
+	go func() {
+		printCurrentState()
+		for {
+			<-vm.StateChangedNotify()
+			printCurrentState()
+		}
+	}()
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, os.Kill, os.Interrupt)
